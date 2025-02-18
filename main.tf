@@ -131,12 +131,44 @@ resource "aws_iam_role_policy_attachment" "default" {
   role       = join("", aws_iam_role.default[*].name)
 }
 
+# Fetch all DynamoDB Table ARNs
+data "aws_dynamodb_tables" "all" {}
+
+data "aws_dynamodb_table" "tables" {
+  for_each = toset(data.aws_dynamodb_tables.all.table_names)
+  name     = each.value
+}
+
+# Fetch all RDS DB Instance ARNs
+data "aws_rds_instances" "all" {}
+
+data "aws_rds_instance" "instances" {
+  for_each = toset(data.aws_rds_instances.all.instance_ids)
+  db_instance_identifier = each.value
+}
+
+# Fetch all RDS DB Cluster ARNs (for Aurora)
+data "aws_rds_clusters" "all" {}
+
+data "aws_rds_cluster" "clusters" {
+  for_each = toset(data.aws_rds_clusters.all.cluster_identifiers)
+  cluster_identifier = each.value
+}
+
+# Combine all discovered ARNs
+locals {
+  dynamodb_tables = [for t in data.aws_dynamodb_table.tables : t.arn]
+  rds_instances   = [for i in data.aws_rds_instance.instances : i.arn]
+  rds_clusters    = [for c in data.aws_rds_cluster.clusters : c.arn]
+  all_backup_resources = concat(local.dynamodb_tables, local.rds_instances, local.rds_clusters)
+}
+
 resource "aws_backup_selection" "default" {
   count         = local.plan_enabled ? 1 : 0
   name          = module.this.id
   iam_role_arn  = local.iam_role_arn
   plan_id       = join("", aws_backup_plan.default[*].id)
-  resources     = var.backup_resources
+  resources     = local.all_backup_resources
   not_resources = var.not_resources
   dynamic "selection_tag" {
     for_each = var.selection_tags
